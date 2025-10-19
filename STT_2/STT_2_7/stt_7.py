@@ -18,6 +18,9 @@ import sys
 import csv
 import zipfile
 import os
+import matplotlib.pyplot as plt
+import numpy as np
+from IPython.display import display
 
 # Increase recursion limit for potentially deep CFGs in larger programs
 sys.setrecursionlimit(2000)
@@ -304,8 +307,6 @@ justification = {
     "Program 3: Sorting Algorithms": "This program is ideal for analyzing complex, nested loops (`for` and `while`). It contains many reassignments inside these loops (swapping elements), making the reaching definitions analysis for loop-carried variables particularly interesting."
 }
 
-
-
 # CORE ANALYZER CLASS (WITH SAVE/EXPORT FUNCTIONALITY)
 
 
@@ -480,7 +481,7 @@ class C_Analyzer:
 
     def run_reaching_definitions(self, csv_filename=None):
         self._identify_definitions()
-        self. _compute_gen_kill()
+        self._compute_gen_kill()
         block_ids = sorted(self.basic_blocks.keys(), key=lambda b: int(b[1:]))
 
         predecessors = {b_id: [] for b_id in block_ids}
@@ -576,7 +577,9 @@ for name, filepath in programs.items():
     print("Basic Blocks Identified (first 5 shown):")
     for i, (block_id, block_info) in enumerate(sorted(analyzer.basic_blocks.items(), key=lambda item: int(item[0][1:]))):
         if i >= 5: break
-        print(f"  {block_id}: {block_info['code']}")
+        # Cleaned up printing for easier copy/pasting
+        code_str = " ".join(block_info['code'])
+        print(f"  {block_id}: {code_str[:70]}...") # Truncate long lines
     if len(analyzer.basic_blocks) > 5: print("  ...")
 
     print("\nDisplaying and Saving Control Flow Graph...")
@@ -585,12 +588,58 @@ for name, filepath in programs.items():
 
     print("\n## 3. Cyclomatic Complexity Metrics\n")
     N, E, CC = analyzer.get_complexity_metrics()
-    metrics_data.append({"Program": name, "Nodes (N)": N, "Edges (E)": E, "Cyclomatic Complexity (CC)": CC})
     print(f"  - Number of Nodes (N): {N}\n  - Number of Edges (E): {E}\n  - Cyclomatic Complexity (CC = E - N + 2): {CC}")
 
     print("\n## 4. Reaching Definitions Analysis\n")
     analyzer.run_reaching_definitions(csv_filename=csv_filename)
     analyzer.interpret_results()
+
+
+    # --- ADDED NEW PLOT 1: DATA-FLOW PROGRESSION (Per-Program) ---
+    print("\n--- Generating Data-Flow Progression Plot ---")
+    try:
+        # 1. Extract Data
+        import matplotlib.pyplot as plt # Import locally for robustness
+        block_ids = sorted(analyzer.basic_blocks.keys(), key=lambda b: int(b[1:]))
+        in_set_sizes = [len(analyzer.in_sets[b_id]) for b_id in block_ids]
+
+        # 2. Create the Plot
+        plt.figure(figsize=(15, 7))
+        plt.plot(block_ids, in_set_sizes, marker='o', linestyle='--', color='r', label='Size of in[B] (Reaching Definitions)')
+
+        # 3. Format the Plot
+        plt.title(f'Data-Flow Progression for {name}', fontsize=16, fontweight='bold')
+        plt.xlabel('Basic Block ID')
+        plt.ylabel('Number of Reaching Definitions')
+        plt.legend(fontsize='large')
+        plt.grid(True, linestyle=':', alpha=0.7)
+
+        # 4. Clean up X-axis for many blocks
+        if len(block_ids) > 25:
+            plt.xticks(rotation=90)
+            ax = plt.gca()
+            ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=25)) # Show ~25 labels
+
+        # 5. Save the Plot
+        plot_filename_prog = f"{base_filename}_dataflow_plot.png"
+        plt.savefig(plot_filename_prog, bbox_inches='tight')
+        print(f"Data-flow plot saved to '{plot_filename_prog}'")
+        output_files.append(plot_filename_prog) # Add to zip
+        plt.show() # Display the plot in the notebook
+    except Exception as e:
+        print(f"Error generating data-flow plot: {e}")
+    # --- END OF NEW DATA-FLOW PLOT ---
+
+    # --- MODIFIED metrics_data.append to include new data ---
+    total_defs = len(analyzer.definitions)
+    metrics_data.append({
+        "Program": name,
+        "Nodes (N)": N,
+        "Edges (E)": E,
+        "Cyclomatic Complexity (CC)": CC,
+        "Total Definitions": total_defs
+    })
+
     print("-" * 60)
 
 print("\n\n" + "="*60 + "\nFinal Summary: Complexity Metrics\n" + "="*60)
@@ -598,6 +647,96 @@ print(f"{'Program':<30} | {'No. of Nodes (N)':<20} | {'No. of Edges (E)':<20} | 
 print("-" * 100)
 for item in metrics_data:
     print(f"{item['Program']:<30} | {item['Nodes (N)']:<20} | {item['Edges (E)']:<20} | {item['Cyclomatic Complexity (CC)']:<25}")
+
+
+# --- ADDED NEW PLOT 2: COMPLEXITY METRICS (Summary) ---
+print("\n\n" + "="*60 + "\nGenerating Complexity Metrics Plot\n" + "="*60)
+
+# 0. Add imports to make this block standalone
+import matplotlib.pyplot as plt
+import numpy as np
+
+try:
+    # 1. Extract Data for Plotting
+    program_names = [item['Program'].replace("Program ", "P\n") for item in metrics_data] # Shorten names
+    nodes_n = [item['Nodes (N)'] for item in metrics_data]
+    edges_e = [item['Edges (E)'] for item in metrics_data]
+    cyclomatic_cc = [item['Cyclomatic Complexity (CC)'] for item in metrics_data]
+
+    # 2. Set up Bar Positions
+    x = np.arange(len(program_names))  # the label locations
+    width = 0.25  # the width of the bars
+    fig, ax = plt.subplots(figsize=(12, 7))
+
+    # 3. Create the Bars
+    rects1 = ax.bar(x - width, nodes_n, width, label='Nodes (N)', color='#cce5ff')
+    rects2 = ax.bar(x, edges_e, width, label='Edges (E)', color='#fff8b3')
+    rects3 = ax.bar(x + width, cyclomatic_cc, width, label='Cyclomatic Complexity (CC)', color='#ffb3b3')
+
+    # 4. Add Labels, Title, and Legend
+    ax.set_ylabel('Count')
+    ax.set_title('Program Complexity Metrics Comparison', fontsize=16, fontweight='bold')
+    ax.set_xticks(x)
+    ax.set_xticklabels(program_names)
+    ax.legend(fontsize='large')
+
+    # Add number labels on top of each bar
+    ax.bar_label(rects1, padding=3)
+    ax.bar_label(rects2, padding=3)
+    ax.bar_label(rects3, padding=3)
+
+    fig.tight_layout()
+
+    # 5. Save the Plot
+    plot_filename = "complexity_metrics_plot.png"
+    plt.savefig(plot_filename)
+    print(f"Metrics plot saved to '{plot_filename}'")
+    output_files.append(plot_filename) # Add plot to the list for zipping
+    plt.show() # Display the plot in the notebook
+except Exception as e:
+    print(f"Error generating complexity plot: {e}")
+# --- END OF NEW PLOT 2 ---
+
+
+# --- ADDED NEW PLOT 3: BLOCKS VS DEFINITIONS (Summary) ---
+print("\n\n" + "="*60 + "\nGenerating Blocks vs. Definitions Plot\n" + "="*60)
+
+try:
+    # 1. Extract Data
+    program_names = [item['Program'].replace("Program ", "P\n") for item in metrics_data]
+    nodes_n = [item['Nodes (N)'] for item in metrics_data]
+    total_defs = [item['Total Definitions'] for item in metrics_data]
+
+    # 2. Set up Bar Positions
+    x = np.arange(len(program_names))
+    width = 0.35
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    # 3. Create the Bars
+    rects1 = ax.bar(x - width/2, nodes_n, width, label='Basic Blocks (N)', color='#007acc')
+    rects2 = ax.bar(x + width/2, total_defs, width, label='Total Definitions (d)', color='#ff8c00')
+
+    # 4. Add Labels and Title
+    ax.set_ylabel('Total Count')
+    ax.set_title('Analysis Components: Basic Blocks vs. Definitions', fontsize=16, fontweight='bold')
+    ax.set_xticks(x)
+    ax.set_xticklabels(program_names)
+    ax.legend(fontsize='large')
+
+    ax.bar_label(rects1, padding=3)
+    ax.bar_label(rects2, padding=3)
+    fig.tight_layout()
+
+    # 5. Save the Plot
+    plot_filename = "blocks_vs_defs_plot.png"
+    plt.savefig(plot_filename)
+    print(f"Blocks vs. Defs plot saved to '{plot_filename}'")
+    output_files.append(plot_filename) # Add to zip
+    plt.show() # Display the plot
+except Exception as e:
+    print(f"Error saving plot: {e}")
+# --- END OF NEW PLOT 3 ---
+
 
 # --- ZIP ALL OUTPUTS FOR EASY DOWNLOAD ---
 zip_filename = "analysis_outputs.zip"
